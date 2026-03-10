@@ -435,11 +435,13 @@ let bgCanvas = null;
 let frameCount = 0;
 
 window.addEventListener('keydown', e => {
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   const k = e.key === ' ' ? ' ' : e.key.toLowerCase();
   keys[k] = true;
   e.preventDefault();
 });
 window.addEventListener('keyup', e => {
+  if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
   const k = e.key === ' ' ? ' ' : e.key.toLowerCase();
   keys[k] = false;
   e.preventDefault();
