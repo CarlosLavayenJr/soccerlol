@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Head Soccer — Chelsea vs Barcelona</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  #header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 10px;
+  }
+  .team-label {
+    font-size: 22px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .chelsea-label { color: #034694; }
+  .barca-label { color: #a50044; }
+  #scoreboard {
+    font-size: 48px;
+    font-weight: 900;
+    color: #fff;
+    min-width: 120px;
+    text-align: center;
+  }
+  canvas {
+    border: 3px solid #333;
+    border-radius: 8px;
+    display: block;
+  }
+  #controls {
+    margin-top: 12px;
+    color: #aaa;
+    font-size: 13px;
+    text-align: center;
+    line-height: 1.8;
+  }
+  #controls span { color: #fff; font-weight: 700; }
+  #overlay {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 10;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  #overlay.show { display: flex; }
+  #overlay h1 { font-size: 52px; color: #fff; margin-bottom: 10px; }
+  #overlay h2 { font-size: 28px; color: #ccc; margin-bottom: 24px; }
+  #overlay button, #lobby button {
+    padding: 14px 40px;
+    font-size: 20px;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #28a745;
+    color: #fff;
+    transition: background 0.2s;
+  }
+  #overlay button:hover, #lobby button:hover { background: #218838; }
+  #goal-flash {
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 80px;
+    font-weight: 900;
+    color: #fff;
+    text-shadow: 0 0 30px rgba(255,215,0,0.8);
+    z-index: 5;
+    pointer-events: none;
+  }
+  #goal-flash.show { display: block; animation: goalPop 1.2s ease-out forwards; }
+  @keyframes goalPop {
+    0% { transform: translate(-50%,-50%) scale(0.3); opacity: 0; }
+    20% { transform: translate(-50%,-50%) scale(1.2); opacity: 1; }
+    100% { transform: translate(-50%,-50%) scale(1); opacity: 0; }
+  }
+
+  /* Lobby */
+  #lobby {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+  #lobby.hidden { display: none; }
+  #lobby h1 { color: #fff; font-size: 42px; margin-bottom: 8px; }
+  #lobby h3 { color: #aaa; font-size: 16px; font-weight: 400; margin-bottom: 16px; }
+  #lobby .btn-row { display: flex; gap: 16px; margin-bottom: 12px; }
+  #lobby button.secondary {
+    background: #034694;
+  }
+  #lobby button.secondary:hover { background: #023670; }
+  #lobby button.tertiary {
+    background: #a50044;
+  }
+  #lobby button.tertiary:hover { background: #800035; }
+  #lobby input {
+    padding: 12px 16px;
+    font-size: 22px;
+    border: 2px solid #555;
+    border-radius: 8px;
+    background: #222;
+    color: #fff;
+    text-align: center;
+    letter-spacing: 6px;
+    font-weight: 700;
+    width: 220px;
+    text-transform: uppercase;
+  }
+  #lobby input::placeholder { letter-spacing: 2px; color: #666; }
+  #lobby .status {
+    color: #81d4fa;
+    font-size: 18px;
+    font-weight: 600;
+    min-height: 28px;
+  }
+  #lobby .room-code {
+    font-size: 48px;
+    font-weight: 900;
+    color: #4caf50;
+    letter-spacing: 8px;
+    cursor: pointer;
+    padding: 8px 24px;
+    border-radius: 8px;
+    background: rgba(76,175,80,0.1);
+    border: 2px dashed #4caf50;
+  }
+  #lobby .room-code:hover { background: rgba(76,175,80,0.2); }
+  #lobby .hint { color: #888; font-size: 13px; }
+  #join-section { display: none; flex-direction: column; align-items: center; gap: 12px; }
+  #host-section { display: none; flex-direction: column; align-items: center; gap: 12px; }
+</style>
+</head>
+<body>
+
+<div id="lobby">
+  <h1>Head Soccer</h1>
+  <h3>Chelsea vs Barcelona — Beach Edition</h3>
+  <div class="btn-row">
+    <button onclick="startLocal()">Local Co-op</button>
+    <button class="secondary" onclick="startHost()">Host Online</button>
+    <button class="tertiary" onclick="showJoin()">Join Online</button>
+  </div>
+  <div id="host-section">
+    <div class="status" id="host-status">Creating room...</div>
+    <div class="room-code" id="room-code" onclick="copyCode()" title="Click to copy"></div>
+    <div class="hint">Share this code with your friend (click to copy)</div>
+  </div>
+  <div id="join-section">
+    <input type="text" id="join-input" placeholder="ROOM CODE" maxlength="6" autocomplete="off">
+    <button class="tertiary" onclick="joinRoom()">Connect</button>
+    <div class="status" id="join-status"></div>
+  </div>
+</div>
+
+<div id="header">
+  <div class="team-label chelsea-label">Chelsea</div>
+  <div id="scoreboard">0 — 0</div>
+  <div class="team-label barca-label">Barcelona</div>
+</div>
+
+<canvas id="game" width="900" height="500"></canvas>
+
+<div id="controls" id="controls-text"></div>
+
+<div id="overlay">
+  <h1 id="winner-text"></h1>
+  <h2 id="final-score"></h2>
+  <button onclick="resetGame()">Play Again</button>
+</div>
+
+<div id="goal-flash">GOAL!</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;
+const H = canvas.height;
+
+// === NETWORKING ===
+let netMode = 'local'; // 'local', 'host', 'client'
+let peer = null;
+let conn = null;
+let remoteKeys = {};
+let gameStarted = false;
+
+function genCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+function startLocal() {
+  netMode = 'local';
+  gameStarted = true;
+  document.getElementById('lobby').classList.add('hidden');
+  document.getElementById('controls').innerHTML =
+    '<span>Player 1 (Drogba):</span> W A S D to move · <span>Space</span> kick · <span>L-Ctrl</span> low driven shot &nbsp;|&nbsp;' +
+    '<span>Player 2 (Messi):</span> Arrow Keys to move · <span>K</span> kick · <span>J</span> low driven shot<br>' +
+    'Hold shot buttons longer for more power! · First to <span>5</span> goals wins! · Press <span>R</span> to restart';
+}
+
+function startHost() {
+  netMode = 'host';
+  document.getElementById('host-section').style.display = 'flex';
+  document.getElementById('join-section').style.display = 'none';
+  const roomId = genCode();
+  document.getElementById('host-status').textContent = 'Creating room...';
+
+  peer = new Peer('headsoccer-' + roomId);
+  peer.on('open', () => {
+    document.getElementById('host-status').textContent = 'Waiting for opponent...';
+    document.getElementById('room-code').textContent = roomId;
+  });
+  peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') {
+      // Try another code
+      peer.destroy();
+      startHost();
+    } else {
+      document.getElementById('host-status').textContent = 'Error: ' + err.type;
+    }
+  });
+  peer.on('connection', (c) => {
+    conn = c;
+    conn.on('open', () => {
+      document.getElementById('host-status').textContent = 'Connected!';
+      setTimeout(() => {
+        gameStarted = true;
+        document.getElementById('lobby').classList.add('hidden');
+        document.getElementById('controls').innerHTML =
+          '<span>You are Drogba (Chelsea):</span> W A S D to move · <span>K</span> kick · <span>J</span> low driven · Press <span>R</span> to restart<br>' +
+          'Hold shot buttons longer for more power! · First to <span>5</span> goals wins!';
+        conn.send({ type: 'start' });
+      }, 500);
+    });
+    conn.on('data', (data) => {
+      if (data.type === 'input') {
+        remoteKeys = data.keys;
+      }
+      if (data.type === 'reset') {
+        resetGame();
+      }
+    });
+    conn.on('close', () => {
+      document.getElementById('controls').innerHTML = '<span style="color:#f44336">Opponent disconnected!</span> Refresh to play again.';
+    });
+  });
+}
+
+function copyCode() {
+  const code = document.getElementById('room-code').textContent;
+  navigator.clipboard.writeText(code);
+  document.getElementById('host-status').textContent = 'Copied! Waiting for opponent...';
+}
+
+function showJoin() {
+  document.getElementById('join-section').style.display = 'flex';
+  document.getElementById('host-section').style.display = 'none';
+  document.getElementById('join-input').focus();
+}
+
+function joinRoom() {
+  const code = document.getElementById('join-input').value.trim().toUpperCase();
+  if (!code || code.length < 4) {
+    document.getElementById('join-status').textContent = 'Enter a valid room code';
+    return;
+  }
+  netMode = 'client';
+  document.getElementById('join-status').textContent = 'Connecting...';
+
+  peer = new Peer();
+  peer.on('open', () => {
+    conn = peer.connect('headsoccer-' + code, { reliable: true });
+    conn.on('open', () => {
+      document.getElementById('join-status').textContent = 'Connected! Starting...';
+    });
+    conn.on('data', (data) => {
+      if (data.type === 'start') {
+        gameStarted = true;
+        document.getElementById('lobby').classList.add('hidden');
+        document.getElementById('controls').innerHTML =
+          '<span>You are Messi (Barcelona):</span> W A S D to move · <span>K</span> kick · <span>J</span> low driven · Press <span>R</span> to restart<br>' +
+          'Hold shot buttons longer for more power! · First to <span>5</span> goals wins!';
+      }
+      if (data.type === 'state') {
+        // Apply received state
+        applyState(data);
+      }
+      if (data.type === 'goal') {
+        showGoal();
+      }
+      if (data.type === 'gameover') {
+        gameOver = true;
+        score = data.score;
+        updateScoreboard();
+        const winner = score[0] >= WINNING_SCORE ? 'Chelsea' : 'Barcelona';
+        document.getElementById('winner-text').textContent = winner + ' Wins!';
+        document.getElementById('winner-text').style.color = score[0] >= WINNING_SCORE ? CHELSEA.primary : BARCA.primary;
+        document.getElementById('final-score').textContent = score[0] + ' — ' + score[1];
+        document.getElementById('overlay').classList.add('show');
+      }
+    });
+    conn.on('close', () => {
+      document.getElementById('controls').innerHTML = '<span style="color:#f44336">Host disconnected!</span> Refresh to play again.';
+    });
+  });
+  peer.on('error', (err) => {
+    document.getElementById('join-status').textContent = 'Error: ' + err.type + '. Check the code?';
+  });
+}
+
+function applyState(data) {
+  p1.x = data.p1.x; p1.y = data.p1.y; p1.vx = data.p1.vx; p1.vy = data.p1.vy;
+  p1.facingRight = data.p1.facingRight; p1.kickTimer = data.p1.kickTimer;
+  p1.legAngle = data.p1.legAngle; p1.isCharging = data.p1.isCharging;
+  p1.chargeFrames = data.p1.chargeFrames; p1.chargeType = data.p1.chargeType;
+
+  p2.x = data.p2.x; p2.y = data.p2.y; p2.vx = data.p2.vx; p2.vy = data.p2.vy;
+  p2.facingRight = data.p2.facingRight; p2.kickTimer = data.p2.kickTimer;
+  p2.legAngle = data.p2.legAngle; p2.isCharging = data.p2.isCharging;
+  p2.chargeFrames = data.p2.chargeFrames; p2.chargeType = data.p2.chargeType;
+
+  ball.x = data.ball.x; ball.y = data.ball.y; ball.vx = data.ball.vx; ball.vy = data.ball.vy;
+  score = data.score;
+  goalCooldown = data.goalCooldown;
+  gameOver = data.gameOver;
+  updateScoreboard();
+}
+
+function getPlayerState(p) {
+  return {
+    x: p.x, y: p.y, vx: p.vx, vy: p.vy,
+    facingRight: p.facingRight, kickTimer: p.kickTimer,
+    legAngle: p.legAngle, isCharging: p.isCharging,
+    chargeFrames: p.chargeFrames, chargeType: p.chargeType
+  };
+}
+
+function sendState() {
+  if (conn && conn.open) {
+    conn.send({
+      type: 'state',
+      p1: getPlayerState(p1),
+      p2: getPlayerState(p2),
+      ball: { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy },
+      score: score,
+      goalCooldown: goalCooldown,
+      gameOver: gameOver
+    });
+  }
+}
+
+function sendInputs() {
+  if (conn && conn.open) {
+    conn.send({
+      type: 'input',
+      keys: {
+        left: !!keys['a'],
+        right: !!keys['d'],
+        up: !!keys['w'],
+        down: !!keys['s'],
+        kick: !!keys['k'],
+        low: !!keys['j']
+      }
+    });
+  }
+}
+
+// === PHYSICS ===
+const GRAVITY = 0.45;
+const GROUND_Y = H - 60;
+const FRICTION = 0.85;
+const BALL_FRICTION = 0.992;
+const BALL_GROUND_FRICTION = 0.97;
+const BOUNCE = 0.65;
+const KICK_RANGE = 60;
+const MAX_SPEED = 6;
+const JUMP_FORCE = -10;
+const WINNING_SCORE = 5;
+const MIN_KICK_POWER = 8;
+const MAX_KICK_POWER = 20;
+const MAX_CHARGE_FRAMES = 45;
+
+const GOAL_W = 12;
+const GOAL_H = 140;
+const GOAL_TOP = GROUND_Y - GOAL_H;
+const GOAL_POST_R = 6;
+
+const CHELSEA = {
+  primary: '#034694', secondary: '#fff', skin: '#5c3a1e',
+  hair: '#1a0e05', socks: '#fff', shorts: '#034694'
+};
+const BARCA = {
+  primary: '#a50044', secondary: '#004d98', skin: '#d4a574',
+  hair: '#1a1a1a', socks: '#004d98', shorts: '#004d98'
+};
+
+let keys = {};
+let score = [0, 0];
+let goalCooldown = 0;
+let gameOver = false;
+let particles = [];
+let screenShake = 0;
+let bgCanvas = null;
+let frameCount = 0;
+
+window.addEventListener('keydown', e => {
+  const k = e.key === ' ' ? ' ' : e.key.toLowerCase();
+  keys[k] = true;
+  e.preventDefault();
+});
+window.addEventListener('keyup', e => {
+  const k = e.key === ' ' ? ' ' : e.key.toLowerCase();
+  keys[k] = false;
+  e.preventDefault();
+});
+
+// Players
+function createPlayer(x, facingRight, colors, name) {
+  return {
+    x, y: GROUND_Y, vx: 0, vy: 0,
+    w: 36, h: 50, headR: 28,
+    onGround: true, facingRight, colors, name,
+    kickTimer: 0, legAngle: 0,
+    chargeKey: null, chargeFrames: 0, chargeType: null, isCharging: false
+  };
+}
+
+let p1 = createPlayer(200, true, CHELSEA, 'drogba');
+let p2 = createPlayer(700, false, BARCA, 'messi');
+let ball = { x: W / 2, y: 200, vx: 0, vy: 0, r: 16 };
+
+// Charge system using direct key booleans
+function handleChargeOnline(p, kickPressed, lowPressed) {
+  if (kickPressed && !p.isCharging && p.kickTimer <= 0) {
+    p.isCharging = true;
+    p.chargeType = 'regular';
+    p.chargeFrames = 0;
+    p._chargeActive = 'kick';
+  }
+  if (lowPressed && !p.isCharging && p.kickTimer <= 0) {
+    p.isCharging = true;
+    p.chargeType = 'low';
+    p.chargeFrames = 0;
+    p._chargeActive = 'low';
+  }
+
+  if (p.isCharging) {
+    const stillHeld = (p._chargeActive === 'kick' && kickPressed) || (p._chargeActive === 'low' && lowPressed);
+    if (stillHeld) {
+      p.chargeFrames = Math.min(p.chargeFrames + 1, MAX_CHARGE_FRAMES);
+    } else {
+      // Released
+      const chargeRatio = Math.max(p.chargeFrames / MAX_CHARGE_FRAMES, 0.15);
+      const power = MIN_KICK_POWER + (MAX_KICK_POWER - MIN_KICK_POWER) * chargeRatio;
+      fireShot(p, power, p.chargeType);
+      p.isCharging = false;
+      p.chargeFrames = 0;
+      p.chargeType = null;
+      p._chargeActive = null;
+    }
+  }
+}
+
+function handleCharge(p, regularKey, lowKey) {
+  handleChargeOnline(p, !!keys[regularKey], !!keys[lowKey]);
+}
+
+function fireShot(p, power, type) {
+  const dx = ball.x - p.x;
+  const dy = ball.y - (p.y - 20);
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist > KICK_RANGE + ball.r) return;
+
+  p.kickTimer = 18;
+  const dir = p.facingRight ? 1 : -1;
+
+  if (type === 'regular') {
+    const kickAngle = dir > 0 ? -0.4 : (Math.PI + 0.4);
+    ball.vx = Math.cos(kickAngle) * power + p.vx * 0.4;
+    ball.vy = Math.sin(kickAngle) * power - (power * 0.4);
+    if (ball.y < p.y - 40) ball.vy -= 4;
+  } else {
+    ball.vx = dir * power * 1.1;
+    ball.vy = 1.5;
+    if (ball.y < GROUND_Y - ball.r - 30) ball.vy = 3;
+  }
+
+  screenShake = 3 + power * 0.3;
+  spawnParticles(ball.x, ball.y, 6 + Math.floor(power * 0.5),
+    type === 'low' ? '#ff6600' : '#fff');
+}
+
+function movePlayer(p, left, right, up, down, minX, maxX) {
+  if (left) { p.vx -= 0.8; p.facingRight = false; }
+  if (right) { p.vx += 0.8; p.facingRight = true; }
+  p.vx = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, p.vx));
+  if (!left && !right) p.vx *= FRICTION;
+
+  if (up && p.onGround) { p.vy = JUMP_FORCE; p.onGround = false; }
+
+  p.vy += GRAVITY;
+  p.x += p.vx;
+  p.y += p.vy;
+
+  if (p.y >= GROUND_Y) { p.y = GROUND_Y; p.vy = 0; p.onGround = true; }
+  p.x = Math.max(minX + p.w / 2, Math.min(maxX - p.w / 2, p.x));
+
+  if (p.kickTimer > 0) {
+    p.kickTimer--;
+    p.legAngle = Math.sin((18 - p.kickTimer) / 18 * Math.PI) * 1.2;
+  } else {
+    p.legAngle *= 0.8;
+  }
+}
+
+function headCollision(p) {
+  const headX = p.x;
+  const headY = p.y - p.h - p.headR + 5;
+  const dx = ball.x - headX;
+  const dy = ball.y - headY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const minDist = p.headR + ball.r;
+
+  if (dist < minDist && dist > 0) {
+    const nx = dx / dist;
+    const ny = dy / dist;
+    ball.x = headX + nx * minDist;
+    ball.y = headY + ny * minDist;
+
+    const relVx = ball.vx - p.vx;
+    const relVy = ball.vy - p.vy;
+    const dot = relVx * nx + relVy * ny;
+
+    const bounceForce = Math.max(-dot * 0.7, 1.5);
+    ball.vx = nx * bounceForce + p.vx * 0.25;
+    ball.vy = ny * bounceForce + p.vy * 0.25;
+    if (ny < -0.3) ball.vy = Math.min(ball.vy, -3);
+    spawnParticles(ball.x - nx * ball.r, ball.y - ny * ball.r, 5, '#ffeb3b');
+    screenShake = 3;
+  }
+}
+
+function bodyCollision(p) {
+  const bodyTop = p.y - p.h;
+  const bodyLeft = p.x - p.w / 2;
+  const bodyRight = p.x + p.w / 2;
+  const closestX = Math.max(bodyLeft, Math.min(ball.x, bodyRight));
+  const closestY = Math.max(bodyTop, Math.min(ball.y, p.y));
+  const dx = ball.x - closestX;
+  const dy = ball.y - closestY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist < ball.r && dist > 0) {
+    const nx = dx / dist;
+    const ny = dy / dist;
+    ball.x = closestX + nx * ball.r;
+    ball.y = closestY + ny * ball.r;
+    const dot = ball.vx * nx + ball.vy * ny;
+    if (dot < 0) {
+      ball.vx -= 1.8 * dot * nx + p.vx * 0.3;
+      ball.vy -= 1.8 * dot * ny + p.vy * 0.3;
+    }
+    if (ny < 0) ball.vy = Math.min(ball.vy, -4);
+  }
+}
+
+function playerCollision(a, b) {
+  const dx = b.x - a.x;
+  const dy = (b.y - b.h / 2) - (a.y - a.h / 2);
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const minDist = a.w / 2 + b.w / 2;
+  if (dist < minDist && dist > 0) {
+    const nx = dx / dist;
+    const push = (minDist - dist) * 0.5;
+    a.x -= nx * push;
+    b.x += nx * push;
+    a.vx -= nx * 1.5;
+    b.vx += nx * 1.5;
+  }
+}
+
+let prevScore = [0, 0];
+
+function updateBall() {
+  ball.vy += GRAVITY;
+  ball.vx *= BALL_FRICTION;
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  if (ball.y + ball.r > GROUND_Y) {
+    ball.y = GROUND_Y - ball.r;
+    ball.vy *= -BOUNCE;
+    ball.vx *= BALL_GROUND_FRICTION;
+    if (Math.abs(ball.vy) < 1.5) ball.vy = 0;
+  }
+
+  if (ball.y - ball.r < 0) { ball.y = ball.r; ball.vy *= -BOUNCE; }
+
+  if (ball.x - ball.r < 0) {
+    if (ball.y + ball.r > GOAL_TOP && ball.y - ball.r < GROUND_Y) {
+      if (goalCooldown <= 0) {
+        score[1]++;
+        goalCooldown = 90;
+        if (netMode === 'host' && conn && conn.open) conn.send({ type: 'goal' });
+        if (netMode !== 'client') showGoal();
+        spawnParticles(ball.x, ball.y, 25, BARCA.primary);
+        checkWin();
+      }
+    } else { ball.x = ball.r; ball.vx *= -BOUNCE; }
+  }
+
+  if (ball.x + ball.r > W) {
+    if (ball.y + ball.r > GOAL_TOP && ball.y - ball.r < GROUND_Y) {
+      if (goalCooldown <= 0) {
+        score[0]++;
+        goalCooldown = 90;
+        if (netMode === 'host' && conn && conn.open) conn.send({ type: 'goal' });
+        if (netMode !== 'client') showGoal();
+        spawnParticles(ball.x, ball.y, 25, CHELSEA.primary);
+        checkWin();
+      }
+    } else { ball.x = W - ball.r; ball.vx *= -BOUNCE; }
+  }
+
+  circleCollision(0, GOAL_TOP, GOAL_POST_R);
+  circleCollision(W, GOAL_TOP, GOAL_POST_R);
+
+  const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+  if (speed > 25) { ball.vx = (ball.vx / speed) * 25; ball.vy = (ball.vy / speed) * 25; }
+}
+
+function checkWin() {
+  if (score[0] >= WINNING_SCORE || score[1] >= WINNING_SCORE) {
+    if (netMode === 'host' && conn && conn.open) {
+      conn.send({ type: 'gameover', score: score });
+    }
+    setTimeout(() => {
+      gameOver = true;
+      const winner = score[0] >= WINNING_SCORE ? 'Chelsea' : 'Barcelona';
+      document.getElementById('winner-text').textContent = winner + ' Wins!';
+      document.getElementById('winner-text').style.color = score[0] >= WINNING_SCORE ? CHELSEA.primary : BARCA.primary;
+      document.getElementById('final-score').textContent = score[0] + ' — ' + score[1];
+      document.getElementById('overlay').classList.add('show');
+    }, 1500);
+  }
+}
+
+function circleCollision(cx, cy, cr) {
+  const dx = ball.x - cx;
+  const dy = ball.y - cy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const minDist = ball.r + cr;
+  if (dist < minDist && dist > 0) {
+    const nx = dx / dist;
+    const ny = dy / dist;
+    ball.x = cx + nx * minDist;
+    ball.y = cy + ny * minDist;
+    const dot = ball.vx * nx + ball.vy * ny;
+    if (dot < 0) {
+      ball.vx -= 2.0 * dot * nx; ball.vy -= 2.0 * dot * ny;
+      ball.vx *= 0.8; ball.vy *= 0.8;
+      spawnParticles(cx + nx * cr, cy + ny * cr, 4, '#fff');
+      screenShake = 4;
+    }
+  }
+}
+
+function showGoal() {
+  const el = document.getElementById('goal-flash');
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+  screenShake = 12;
+  updateScoreboard();
+}
+
+function updateScoreboard() {
+  document.getElementById('scoreboard').textContent = score[0] + ' — ' + score[1];
+}
+
+function resetPositions() {
+  p1.x = 200; p1.y = GROUND_Y; p1.vx = 0; p1.vy = 0; p1.kickTimer = 0;
+  p1.isCharging = false; p1.chargeFrames = 0; p1.chargeKey = null; p1._chargeActive = null;
+  p2.x = 700; p2.y = GROUND_Y; p2.vx = 0; p2.vy = 0; p2.kickTimer = 0;
+  p2.isCharging = false; p2.chargeFrames = 0; p2.chargeKey = null; p2._chargeActive = null;
+  ball.x = W / 2; ball.y = 200; ball.vx = 0; ball.vy = 0;
+}
+
+function resetGame() {
+  score = [0, 0];
+  gameOver = false;
+  goalCooldown = 0;
+  updateScoreboard();
+  document.getElementById('overlay').classList.remove('show');
+  resetPositions();
+  if (netMode === 'client' && conn && conn.open) conn.send({ type: 'reset' });
+}
+
+function spawnParticles(x, y, count, color) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 4 + 2;
+    particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 2,
+      life: 30 + Math.random() * 20, maxLife: 50, color, r: Math.random() * 4 + 2 });
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// === BEACH BACKGROUND ===
+function createBeachBG() {
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = W; bgCanvas.height = H;
+  const c = bgCanvas.getContext('2d');
+
+  const skyGrad = c.createLinearGradient(0, 0, 0, GROUND_Y);
+  skyGrad.addColorStop(0, '#4fc3f7'); skyGrad.addColorStop(0.4, '#81d4fa');
+  skyGrad.addColorStop(0.7, '#b3e5fc'); skyGrad.addColorStop(1, '#e1f5fe');
+  c.fillStyle = skyGrad; c.fillRect(0, 0, W, GROUND_Y);
+
+  c.fillStyle = '#fff176'; c.beginPath(); c.arc(720, 60, 40, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(255,241,118,0.3)'; c.beginPath(); c.arc(720, 60, 60, 0, Math.PI * 2); c.fill();
+
+  function drawCloud(cx, cy, scale) {
+    c.fillStyle = 'rgba(255,255,255,0.8)'; c.beginPath();
+    c.arc(cx, cy, 20*scale, 0, Math.PI*2); c.arc(cx+18*scale, cy-8*scale, 16*scale, 0, Math.PI*2);
+    c.arc(cx+35*scale, cy, 20*scale, 0, Math.PI*2); c.arc(cx+16*scale, cy+5*scale, 14*scale, 0, Math.PI*2);
+    c.fill();
+  }
+  drawCloud(120, 50, 1); drawCloud(400, 35, 0.8); drawCloud(600, 70, 1.1);
+
+  const oceanY = GROUND_Y - 100;
+  const oceanGrad = c.createLinearGradient(0, oceanY, 0, GROUND_Y);
+  oceanGrad.addColorStop(0, '#0288d1'); oceanGrad.addColorStop(0.5, '#039be5'); oceanGrad.addColorStop(1, '#4fc3f7');
+  c.fillStyle = oceanGrad; c.fillRect(0, oceanY, W, 100);
+
+  c.strokeStyle = 'rgba(255,255,255,0.4)'; c.lineWidth = 2;
+  for (let wave = 0; wave < 4; wave++) {
+    c.beginPath(); const wy = oceanY + 20 + wave * 22;
+    for (let x = 0; x < W; x += 2) { const y = wy + Math.sin(x*0.03+wave*2)*4; x===0?c.moveTo(x,y):c.lineTo(x,y); }
+    c.stroke();
+  }
+
+  const sandGrad = c.createLinearGradient(0, GROUND_Y, 0, H);
+  sandGrad.addColorStop(0, '#ffe0b2'); sandGrad.addColorStop(0.3, '#ffcc80'); sandGrad.addColorStop(1, '#ffb74d');
+  c.fillStyle = sandGrad; c.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+
+  c.fillStyle = 'rgba(210,160,80,0.3)';
+  for (let i = 0; i < 200; i++) {
+    c.beginPath(); c.arc(Math.random()*W, GROUND_Y+Math.random()*(H-GROUND_Y), Math.random()*2+0.5, 0, Math.PI*2); c.fill();
+  }
+
+  drawPalmTree(c, 70, GROUND_Y - 5, 0.9);
+  drawPalmTree(c, W - 60, GROUND_Y - 5, 1);
+}
+
+function drawPalmTree(c, x, y, scale) {
+  c.strokeStyle = '#795548'; c.lineWidth = 8*scale; c.lineCap = 'round';
+  c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x+10*scale, y-80*scale, x+5*scale, y-140*scale); c.stroke();
+  c.strokeStyle = '#5d4037'; c.lineWidth = 1;
+  for (let i = 0; i < 8; i++) { c.beginPath(); c.moveTo(x-4*scale, y-i*16*scale); c.lineTo(x+8*scale, y-i*16*scale); c.stroke(); }
+  const topX = x+5*scale, topY = y-140*scale;
+  c.fillStyle = '#4caf50';
+  for (let i = 0; i < 6; i++) { c.save(); c.translate(topX,topY); c.rotate((i/6)*Math.PI*2+0.3); c.beginPath(); c.ellipse(30*scale,0,35*scale,8*scale,0,0,Math.PI*2); c.fill(); c.restore(); }
+  c.fillStyle = '#388e3c';
+  for (let i = 0; i < 3; i++) { c.save(); c.translate(topX,topY); c.rotate((i/3)*Math.PI*2+1); c.beginPath(); c.ellipse(25*scale,0,28*scale,5*scale,0,0,Math.PI*2); c.fill(); c.restore(); }
+}
+
+function drawBackground() {
+  if (!bgCanvas) createBeachBG();
+  ctx.drawImage(bgCanvas, 0, 0);
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(W, GROUND_Y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2, GROUND_Y); ctx.lineTo(W/2, H); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2, GROUND_Y+30, 40, 0, Math.PI*2); ctx.stroke();
+  drawGoal(0, true); drawGoal(W, false);
+}
+
+function drawGoal(edgeX, isLeft) {
+  const netDepth = 40;
+  const x = isLeft ? edgeX : edgeX - netDepth;
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(x, GOAL_TOP, netDepth, GOAL_H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+  for (let i = GOAL_TOP; i < GROUND_Y; i += 14) { ctx.beginPath(); ctx.moveTo(x,i); ctx.lineTo(x+netDepth,i); ctx.stroke(); }
+  for (let i = 0; i < netDepth; i += 14) { ctx.beginPath(); ctx.moveTo(x+i,GOAL_TOP); ctx.lineTo(x+i,GROUND_Y); ctx.stroke(); }
+  const postX = isLeft ? x + netDepth : x;
+  ctx.fillStyle = '#fff'; ctx.fillRect(postX-3, GOAL_TOP-4, 6, GOAL_H+4); ctx.fillRect(x, GOAL_TOP-5, netDepth, 7);
+  ctx.beginPath(); ctx.arc(isLeft?0:W, GOAL_TOP, GOAL_POST_R, 0, Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
+}
+
+// === CHARACTER DRAWING ===
+function drawPlayer(p) {
+  const dir = p.facingRight ? 1 : -1;
+  const col = p.colors;
+  const headY = p.y - p.h - p.headR + 5;
+  const bodyTop = p.y - p.h;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(p.x, GROUND_Y+2, 22, 6, 0, 0, Math.PI*2); ctx.fill();
+
+  ctx.save(); ctx.translate(p.x, p.y-10);
+  ctx.fillStyle = col.socks; ctx.save(); ctx.rotate(-dir*p.legAngle*0.5); ctx.fillRect(-5,0,10,14); ctx.restore();
+  ctx.save(); ctx.rotate(dir*p.legAngle); ctx.fillRect(-5,0,10,14); ctx.fillStyle='#111'; ctx.fillRect(dir>0?-3:-7,10,12,5); ctx.restore();
+  ctx.restore();
+
+  ctx.fillStyle = col.primary; ctx.beginPath(); ctx.roundRect(p.x-14, bodyTop+5, 28, 30, 4); ctx.fill();
+  if (p.name === 'messi') { ctx.fillStyle = col.secondary; for (let i=0;i<3;i++) ctx.fillRect(p.x-12+i*10, bodyTop+7, 5, 26); }
+  ctx.fillStyle = col.shorts; ctx.fillRect(p.x-12, bodyTop+30, 24, 12);
+
+  ctx.strokeStyle = col.skin; ctx.lineWidth = 6; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(p.x-14, bodyTop+15); ctx.lineTo(p.x-22, bodyTop+30); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(p.x+14, bodyTop+15); ctx.lineTo(p.x+22, bodyTop+30); ctx.stroke();
+
+  ctx.fillStyle = col.skin; ctx.beginPath(); ctx.arc(p.x, headY, p.headR, 0, Math.PI*2); ctx.fill();
+
+  if (p.name === 'drogba') drawDrogba(p, headY, bodyTop, dir);
+  else drawMessi(p, headY, bodyTop, dir);
+
+  if (p.isCharging) {
+    const ratio = p.chargeFrames / MAX_CHARGE_FRAMES;
+    const barW=40, barH=6, barX=p.x-barW/2, barY=p.y-p.h-p.headR*2-20;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(barX-1,barY-1,barW+2,barH+2);
+    ctx.fillStyle = `rgb(${Math.floor(255*ratio)},${Math.floor(255*(1-ratio))},0)`;
+    ctx.fillRect(barX,barY,barW*ratio,barH);
+    ctx.fillStyle='#fff'; ctx.font='bold 9px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(p.chargeType==='low'?'LOW':'KICK', p.x, barY-3);
+  }
+
+  if (p.kickTimer > 12) {
+    ctx.strokeStyle = 'rgba(255,255,0,0.6)'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.arc(p.x+dir*30, p.y-5, 15+(18-p.kickTimer)*3, 0, Math.PI*2); ctx.stroke();
+  }
+}
+
+function drawDrogba(p, headY, bodyTop, dir) {
+  const col = p.colors;
+  ctx.fillStyle = col.hair; ctx.beginPath(); ctx.arc(p.x, headY-3, p.headR+1, Math.PI+0.3, -0.3); ctx.fill();
+  ctx.fillStyle = col.skin;
+  ctx.beginPath(); ctx.ellipse(p.x-p.headR+2, headY, 5, 7, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(p.x+p.headR-2, headY, 5, 7, 0, 0, Math.PI*2); ctx.fill();
+  const e1X=p.x-8, e2X=p.x+8, eY=headY-3;
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.ellipse(e1X,eY,5.5,6.5,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(e2X,eY,5.5,6.5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#1a0e05';
+  ctx.beginPath(); ctx.arc(e1X+dir*2,eY,3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(e2X+dir*2,eY,3,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#1a0e05'; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.moveTo(e1X-5,eY-8); ctx.lineTo(e1X+5,eY-9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(e2X-5,eY-9); ctx.lineTo(e2X+5,eY-8); ctx.stroke();
+  ctx.fillStyle='#4a2a10'; ctx.beginPath(); ctx.ellipse(p.x,headY+4,3,2.5,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#3a1a08'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(p.x,headY+12,7,0.2,Math.PI-0.2); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center'; ctx.fillText('11',p.x,bodyTop+22);
+}
+
+function drawMessi(p, headY, bodyTop, dir) {
+  const col = p.colors;
+  ctx.fillStyle = col.hair; ctx.beginPath(); ctx.arc(p.x, headY-2, p.headR+2, Math.PI+0.15, -0.15); ctx.fill();
+  ctx.fillRect(p.x-p.headR-1, headY-10, 7, 18); ctx.fillRect(p.x+p.headR-6, headY-10, 7, 18);
+  ctx.fillStyle = col.skin;
+  ctx.beginPath(); ctx.ellipse(p.x-p.headR+4, headY+2, 4, 6, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(p.x+p.headR-4, headY+2, 4, 6, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#2a1a0a'; ctx.beginPath(); ctx.ellipse(p.x,headY+14,12,10,0,0,Math.PI); ctx.fill();
+  ctx.fillStyle=col.skin; ctx.beginPath(); ctx.ellipse(p.x,headY+12,8,5,0,0,Math.PI); ctx.fill();
+  ctx.fillStyle='rgba(42,26,10,0.6)'; ctx.beginPath(); ctx.ellipse(p.x,headY+13,10,8,0,0.2,Math.PI-0.2); ctx.fill();
+  const e1X=p.x-8, e2X=p.x+8, eY=headY-2;
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.ellipse(e1X,eY,5,6,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(e2X,eY,5,6,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#2a1500';
+  ctx.beginPath(); ctx.arc(e1X+dir*1.5,eY,2.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(e2X+dir*1.5,eY,2.5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#1a1a1a'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(e1X-4,eY-7); ctx.lineTo(e1X+4,eY-8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(e2X-4,eY-8); ctx.lineTo(e2X+4,eY-7); ctx.stroke();
+  ctx.fillStyle='#b8926a'; ctx.beginPath(); ctx.ellipse(p.x,headY+4,2.5,2,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#5a3a1a'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(p.x,headY+10,4,0.3,Math.PI-0.3); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center'; ctx.fillText('10',p.x,bodyTop+22);
+}
+
+function drawBall() {
+  ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.beginPath(); ctx.ellipse(ball.x,GROUND_Y+2,ball.r*0.8,4,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; const rot=(ball.x+ball.y)*0.05;
+  for (let i=0;i<5;i++){const a=rot+(i/5)*Math.PI*2; ctx.beginPath(); ctx.arc(ball.x+Math.cos(a)*ball.r*0.5,ball.y+Math.sin(a)*ball.r*0.5,3.5,0,Math.PI*2); ctx.fill();}
+  ctx.strokeStyle='#555'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.stroke();
+}
+
+// === GAME LOOP ===
+let sendTimer = 0;
+
+function gameLoop() {
+  frameCount++;
+
+  if (gameStarted && !gameOver) {
+    if (goalCooldown > 0) { goalCooldown--; if (goalCooldown === 60) resetPositions(); }
+
+    if (goalCooldown <= 60) {
+      if (netMode === 'local') {
+        // Local: both players use their own keys
+        movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
+        handleCharge(p1, ' ', 'control');
+        movePlayer(p2, keys['arrowleft'], keys['arrowright'], keys['arrowup'], keys['arrowdown'], 0, W);
+        handleCharge(p2, 'k', 'j');
+      } else if (netMode === 'host') {
+        // Host: P1 = local WASD+J/K, P2 = remote WASD+J/K
+        movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
+        handleCharge(p1, 'k', 'j');
+        movePlayer(p2, remoteKeys.left, remoteKeys.right, remoteKeys.up, remoteKeys.down, 0, W);
+        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low);
+      } else if (netMode === 'client') {
+        // Client sends inputs, doesn't run physics
+        sendInputs();
+      }
+
+      if (netMode !== 'client') {
+        headCollision(p1); headCollision(p2);
+        bodyCollision(p1); bodyCollision(p2);
+        playerCollision(p1, p2);
+        updateBall();
+      }
+
+      // Host sends state every 2 frames (~30fps)
+      if (netMode === 'host') {
+        sendTimer++;
+        if (sendTimer >= 2) { sendState(); sendTimer = 0; }
+      }
+    }
+
+    updateParticles();
+  }
+
+  if (keys['r'] && !gameOver && gameStarted) resetGame();
+
+  // Draw (always)
+  ctx.save();
+  if (screenShake > 0) {
+    ctx.translate((Math.random()-0.5)*screenShake*2, (Math.random()-0.5)*screenShake*2);
+    screenShake *= 0.85; if (screenShake < 0.5) screenShake = 0;
+  }
+
+  drawBackground();
+  drawPlayer(p1); drawPlayer(p2);
+  drawBall();
+  drawParticles();
+
+  ctx.restore();
+
+  requestAnimationFrame(gameLoop);
+}
+
+updateScoreboard();
+gameLoop();
+</script>
+</body>
+</html>
