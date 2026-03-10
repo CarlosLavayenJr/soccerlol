@@ -460,7 +460,7 @@ let p1 = createPlayer(200, true, CHELSEA, 'drogba');
 let p2 = createPlayer(700, false, BARCA, 'messi');
 let ball = { x: W / 2, y: 200, vx: 0, vy: 0, r: 16 };
 
-// Charge system using direct key booleans
+// Charge system using direct key booleans clos
 function handleChargeOnline(p, kickPressed, lowPressed) {
   if (kickPressed && !p.isCharging && p.kickTimer <= 0) {
     p.isCharging = true;
