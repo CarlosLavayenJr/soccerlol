@@ -320,6 +320,9 @@ function joinRoom() {
         crowdCelebrate = data.team === 'chelsea' ? 180 : -180;
         showGoal();
       }
+      if (data.type === 'whistle') {
+        whistleTimer = 90;
+      }
       if (data.type === 'gameover') {
         gameOver = true;
         score = data.score;
@@ -442,6 +445,8 @@ let bgCanvas = null;
 let frameCount = 0;
 let fans = [];
 let crowdCelebrate = 0; // +ve = chelsea celebrating, -ve = barca
+let deadlockTimer = 0;
+let whistleTimer = 0;
 
 window.addEventListener('keydown', e => {
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
@@ -628,6 +633,43 @@ function movePlayer(p, left, right, up, down, minX, maxX) {
   if (p.onGround) p._bicycleUsed = false;
 }
 
+function pushPlayerFromBall(p) {
+  // Prevent player from walking through the ball
+  const bodyTop = p.y - p.h;
+  const bodyLeft = p.x - p.w / 2;
+  const bodyRight = p.x + p.w / 2;
+  const closestX = Math.max(bodyLeft, Math.min(ball.x, bodyRight));
+  const closestY = Math.max(bodyTop, Math.min(ball.y, p.y));
+  const dx = ball.x - closestX;
+  const dy = ball.y - closestY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  const minDist = ball.r + 1;
+  if (dist < minDist) {
+    let pushX;
+    if (dist === 0) {
+      pushX = (ball.x > p.x) ? -minDist : minDist;
+    } else {
+      const overlap = minDist - dist;
+      pushX = -(dx / dist) * overlap;
+    }
+    p.x += pushX;
+    if ((ball.x - p.x) * p.vx > 0) p.vx *= 0.1;
+  }
+  // Head check
+  if (p._headImmunity > 0) return;
+  const headX = p.x;
+  const headY = p.y - p.h - p.headR + 5;
+  const hdx = ball.x - headX;
+  const hdy = ball.y - headY;
+  const hdist = Math.sqrt(hdx * hdx + hdy * hdy);
+  const hmin = p.headR + ball.r + 1;
+  if (hdist < hmin && hdist > 0) {
+    const overlap = hmin - hdist;
+    p.x -= (hdx / hdist) * overlap;
+    if ((ball.x - p.x) * p.vx > 0) p.vx *= 0.1;
+  }
+}
+
 function headCollision(p) {
   if (p._headImmunity > 0) return;
   const headX = p.x;
@@ -694,6 +736,9 @@ function bodyCollision(p) {
       ball.vy -= 1.8 * dot * ny + p.vy * 0.3;
     }
     if (ny < 0) ball.vy = Math.min(ball.vy, -4);
+    // Push player back from ball
+    p.x -= nx * 2;
+    if (nx * p.vx > 0) p.vx *= 0.3;
   }
 }
 
@@ -719,7 +764,7 @@ function updateBall() {
   ball.vx *= BALL_FRICTION;
 
   // Substep movement to prevent ball tunneling through players
-  const steps = 3;
+  const steps = 5;
   for (let s = 0; s < steps; s++) {
     ball.x += ball.vx / steps;
     ball.y += ball.vy / steps;
@@ -830,6 +875,7 @@ function resetPositions() {
   p2.isCharging = false; p2.chargeFrames = 0; p2.chargeKey = null; p2._chargeActive = null; p2._shotCancelled = false;
   p2.flipTimer = 0; p2._bicycleUsed = false;
   ball.x = W / 2; ball.y = 200; ball.vx = 0; ball.vy = 0;
+  deadlockTimer = 0;
 }
 
 function resetGame() {
@@ -876,11 +922,11 @@ function initFans() {
   fans = [];
   const skinTones = ['#f5d0a9', '#d4a574', '#8d5524', '#5c3a1e', '#c68642'];
   const rows = [
-    { y: 25, count: 32, size: 0.5 },
-    { y: 52, count: 30, size: 0.58 },
-    { y: 82, count: 27, size: 0.66 },
-    { y: 115, count: 24, size: 0.76 },
-    { y: 150, count: 21, size: 0.88 },
+    { y: 18, count: 26, size: 0.7 },
+    { y: 52, count: 24, size: 0.82 },
+    { y: 88, count: 21, size: 0.95 },
+    { y: 128, count: 18, size: 1.1 },
+    { y: 168, count: 15, size: 1.28 },
   ];
   for (const row of rows) {
     for (let i = 0; i < row.count; i++) {
@@ -1214,11 +1260,13 @@ function gameLoop() {
       if (netMode === 'local') {
         // Local: both players use their own keys
         movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
+        pushPlayerFromBall(p1);
         handleCharge(p1, ' ', 'control', 'q', ' ');
         if (keys['e'] && !p1.onGround && p1.kickTimer <= 0 && !p1._bicycleUsed && !p1.isCharging) {
           bicycleKick(p1); p1._bicycleUsed = true;
         }
         movePlayer(p2, keys['arrowleft'], keys['arrowright'], keys['arrowup'], keys['arrowdown'], 0, W);
+        pushPlayerFromBall(p2);
         handleCharge(p2, 'k', 'j', 'm', ' ');
         if (keys['h'] && !p2.onGround && p2.kickTimer <= 0 && !p2._bicycleUsed && !p2.isCharging) {
           bicycleKick(p2); p2._bicycleUsed = true;
@@ -1226,11 +1274,13 @@ function gameLoop() {
       } else if (netMode === 'host') {
         // Host: P1 = local WASD+J/K, P2 = remote WASD+J/K
         movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
+        pushPlayerFromBall(p1);
         handleCharge(p1, 'k', 'j', 'm', ' ');
         if (keys['h'] && !p1.onGround && p1.kickTimer <= 0 && !p1._bicycleUsed && !p1.isCharging) {
           bicycleKick(p1); p1._bicycleUsed = true;
         }
         movePlayer(p2, remoteKeys.left, remoteKeys.right, remoteKeys.up, remoteKeys.down, 0, W);
+        pushPlayerFromBall(p2);
         handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low, !!remoteKeys.upkick, !!remoteKeys.cancel);
         if (remoteKeys.bicycle && !p2.onGround && p2.kickTimer <= 0 && !p2._bicycleUsed && !p2.isCharging) {
           bicycleKick(p2); p2._bicycleUsed = true;
@@ -1243,6 +1293,22 @@ function gameLoop() {
       if (netMode !== 'client') {
         playerCollision(p1, p2);
         updateBall();
+
+        // Deadlock detection - ball stuck between players for 3 seconds
+        const ballSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+        const pDist = Math.abs(p1.x - p2.x);
+        const ballBetween = ball.x > Math.min(p1.x, p2.x) - 10 && ball.x < Math.max(p1.x, p2.x) + 10;
+        if (ballSpeed < 3 && pDist < p1.w + p2.w + ball.r * 2 + 20 && ballBetween) {
+          deadlockTimer++;
+          if (deadlockTimer >= 180) {
+            deadlockTimer = 0;
+            whistleTimer = 90;
+            resetPositions();
+            if (netMode === 'host' && conn && conn.open) conn.send({ type: 'whistle' });
+          }
+        } else {
+          deadlockTimer = 0;
+        }
       }
 
       // Host sends state every 2 frames (~30fps)
@@ -1268,6 +1334,22 @@ function gameLoop() {
   drawPlayer(p1); drawPlayer(p2);
   drawBall();
   drawParticles();
+
+  // Whistle indicator
+  if (whistleTimer > 0) {
+    const alpha = Math.min(1, whistleTimer / 30);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText('WHISTLE!', W / 2, H / 2 - 60);
+    ctx.fillText('WHISTLE!', W / 2, H / 2 - 60);
+    ctx.restore();
+    whistleTimer--;
+  }
 
   ctx.restore();
 
