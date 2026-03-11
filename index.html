@@ -317,6 +317,7 @@ function joinRoom() {
         applyState(data);
       }
       if (data.type === 'goal') {
+        crowdCelebrate = data.team === 'chelsea' ? 180 : -180;
         showGoal();
       }
       if (data.type === 'gameover') {
@@ -394,7 +395,7 @@ function sendInputs() {
         down: !!keys['s'],
         kick: !!keys['k'],
         low: !!keys['j'],
-        up: !!keys['m'],
+        upkick: !!keys['m'],
         bicycle: !!keys['h'],
         cancel: !!keys[' ']
       }
@@ -439,6 +440,8 @@ let particles = [];
 let screenShake = 0;
 let bgCanvas = null;
 let frameCount = 0;
+let fans = [];
+let crowdCelebrate = 0; // +ve = chelsea celebrating, -ve = barca
 
 window.addEventListener('keydown', e => {
   if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
@@ -550,6 +553,7 @@ function fireShot(p, power, type) {
   } else if (type === 'up') {
     ball.vx = p.vx * 0.3;
     ball.vy = -power * 1.1;
+    p._headImmunity = 10;
   } else {
     ball.vx = dir * power * 1.1;
     ball.vy = 1.5;
@@ -562,22 +566,33 @@ function fireShot(p, power, type) {
 }
 
 function bicycleKick(p) {
-  const dx = ball.x - p.x;
-  const dy = ball.y - (p.y - 20);
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  if (dist > KICK_RANGE + ball.r + 10) return;
-
   p.kickTimer = 20;
   p.flipTimer = 20;
   p._windupAngle = 0;
+
   const dir = p.facingRight ? 1 : -1;
+  const goalDir = p.name === 'drogba' ? 1 : -1; // direction to score
+  const facingGoal = (dir === goalDir);
   const power = MAX_KICK_POWER;
 
-  ball.vx = dir * power * 1.0;
-  ball.vy = -power * 0.6;
-
-  screenShake = 8;
-  spawnParticles(ball.x, ball.y, 15, '#ff4444');
+  // Check if ball is in range
+  const dx = ball.x - p.x;
+  const dy = ball.y - (p.y - 20);
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist <= KICK_RANGE + ball.r + 10) {
+    if (facingGoal) {
+      // Spike: facing enemy goal, smash ball downward
+      ball.vx = goalDir * power * 0.8;
+      ball.vy = power * 0.7;
+      spawnParticles(ball.x, ball.y, 15, '#ff8800');
+    } else {
+      // Classic bicycle: facing own goal, kick over head toward enemy goal
+      ball.vx = goalDir * power * 1.0;
+      ball.vy = -power * 0.4;
+      spawnParticles(ball.x, ball.y, 15, '#ff4444');
+    }
+    screenShake = 8;
+  }
 }
 
 function movePlayer(p, left, right, up, down, minX, maxX) {
@@ -609,10 +624,12 @@ function movePlayer(p, left, right, up, down, minX, maxX) {
   }
 
   if (p.flipTimer > 0) p.flipTimer--;
+  if (p._headImmunity > 0) p._headImmunity--;
   if (p.onGround) p._bicycleUsed = false;
 }
 
 function headCollision(p) {
+  if (p._headImmunity > 0) return;
   const headX = p.x;
   const headY = p.y - p.h - p.headR + 5;
   const dx = ball.x - headX;
@@ -725,7 +742,8 @@ function updateBall() {
         if (goalCooldown <= 0) {
           score[1]++;
           goalCooldown = 90;
-          if (netMode === 'host' && conn && conn.open) conn.send({ type: 'goal' });
+          crowdCelebrate = -180;
+          if (netMode === 'host' && conn && conn.open) conn.send({ type: 'goal', team: 'barca' });
           if (netMode !== 'client') showGoal();
           spawnParticles(ball.x, ball.y, 25, BARCA.primary);
           checkWin();
@@ -738,7 +756,8 @@ function updateBall() {
         if (goalCooldown <= 0) {
           score[0]++;
           goalCooldown = 90;
-          if (netMode === 'host' && conn && conn.open) conn.send({ type: 'goal' });
+          crowdCelebrate = 180;
+          if (netMode === 'host' && conn && conn.open) conn.send({ type: 'goal', team: 'chelsea' });
           if (netMode !== 'client') showGoal();
           spawnParticles(ball.x, ball.y, 25, CHELSEA.primary);
           checkWin();
@@ -817,6 +836,7 @@ function resetGame() {
   score = [0, 0];
   gameOver = false;
   goalCooldown = 0;
+  crowdCelebrate = 0;
   updateScoreboard();
   document.getElementById('overlay').classList.remove('show');
   resetPositions();
@@ -851,72 +871,211 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-// === BEACH BACKGROUND ===
-function createBeachBG() {
+// === STADIUM CROWD ===
+function initFans() {
+  fans = [];
+  const skinTones = ['#f5d0a9', '#d4a574', '#8d5524', '#5c3a1e', '#c68642'];
+  const rows = [
+    { y: 25, count: 32, size: 0.5 },
+    { y: 52, count: 30, size: 0.58 },
+    { y: 82, count: 27, size: 0.66 },
+    { y: 115, count: 24, size: 0.76 },
+    { y: 150, count: 21, size: 0.88 },
+  ];
+  for (const row of rows) {
+    for (let i = 0; i < row.count; i++) {
+      const x = (W / (row.count + 1)) * (i + 1) + (Math.random() - 0.5) * 8;
+      fans.push({
+        x, y: row.y + (Math.random() - 0.5) * 6,
+        team: x < W / 2 ? 'chelsea' : 'barca',
+        phase: Math.random() * Math.PI * 2,
+        speed: 0.7 + Math.random() * 0.6,
+        size: row.size + (Math.random() - 0.5) * 0.05,
+        skin: skinTones[Math.floor(Math.random() * skinTones.length)],
+        hasScarf: Math.random() > 0.6,
+      });
+    }
+  }
+}
+
+function createStadiumBG() {
   bgCanvas = document.createElement('canvas');
   bgCanvas.width = W; bgCanvas.height = H;
   const c = bgCanvas.getContext('2d');
 
-  const skyGrad = c.createLinearGradient(0, 0, 0, GROUND_Y);
-  skyGrad.addColorStop(0, '#4fc3f7'); skyGrad.addColorStop(0.4, '#81d4fa');
-  skyGrad.addColorStop(0.7, '#b3e5fc'); skyGrad.addColorStop(1, '#e1f5fe');
-  c.fillStyle = skyGrad; c.fillRect(0, 0, W, GROUND_Y);
+  // Stadium stands
+  const standGrad = c.createLinearGradient(0, 0, 0, 190);
+  standGrad.addColorStop(0, '#1a1a2e');
+  standGrad.addColorStop(1, '#2a2a4a');
+  c.fillStyle = standGrad;
+  c.fillRect(0, 0, W, 190);
 
-  c.fillStyle = '#fff176'; c.beginPath(); c.arc(720, 60, 40, 0, Math.PI * 2); c.fill();
-  c.fillStyle = 'rgba(255,241,118,0.3)'; c.beginPath(); c.arc(720, 60, 60, 0, Math.PI * 2); c.fill();
+  // Chelsea section tint (left)
+  c.fillStyle = 'rgba(3,70,148,0.12)';
+  c.fillRect(0, 0, W / 2, 190);
+  // Barca section tint (right)
+  c.fillStyle = 'rgba(165,0,68,0.12)';
+  c.fillRect(W / 2, 0, W / 2, 190);
 
-  function drawCloud(cx, cy, scale) {
-    c.fillStyle = 'rgba(255,255,255,0.8)'; c.beginPath();
-    c.arc(cx, cy, 20*scale, 0, Math.PI*2); c.arc(cx+18*scale, cy-8*scale, 16*scale, 0, Math.PI*2);
-    c.arc(cx+35*scale, cy, 20*scale, 0, Math.PI*2); c.arc(cx+16*scale, cy+5*scale, 14*scale, 0, Math.PI*2);
+  // Tier lines
+  c.strokeStyle = 'rgba(255,255,255,0.04)';
+  c.lineWidth = 1;
+  for (let y = 20; y < 190; y += 34) {
+    c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke();
+  }
+
+  // Section divider
+  c.strokeStyle = 'rgba(255,255,255,0.15)';
+  c.lineWidth = 2;
+  c.beginPath(); c.moveTo(W / 2, 0); c.lineTo(W / 2, 190); c.stroke();
+
+  // Stadium barrier wall
+  const wallGrad = c.createLinearGradient(0, 185, 0, 215);
+  wallGrad.addColorStop(0, '#556');
+  wallGrad.addColorStop(1, '#334');
+  c.fillStyle = wallGrad;
+  c.fillRect(0, 185, W, 30);
+
+  // Advertising boards
+  c.fillStyle = '#222';
+  c.fillRect(0, 207, W, 14);
+  c.font = 'bold 9px sans-serif';
+  c.textAlign = 'center';
+  c.fillStyle = '#888';
+  for (let x = 75; x < W; x += 180) {
+    c.fillText('HEAD SOCCER', x, 217);
+  }
+
+  // Floodlights
+  for (const lx of [80, 300, 600, 820]) {
+    c.fillStyle = '#666';
+    c.fillRect(lx - 1, 0, 3, 12);
+    c.fillStyle = '#ffe';
+    c.beginPath(); c.arc(lx, 4, 4, 0, Math.PI * 2); c.fill();
+    c.fillStyle = 'rgba(255,255,230,0.025)';
+    c.beginPath();
+    c.moveTo(lx - 30, 4); c.lineTo(lx + 30, 4);
+    c.lineTo(lx + 80, GROUND_Y); c.lineTo(lx - 80, GROUND_Y);
     c.fill();
   }
-  drawCloud(120, 50, 1); drawCloud(400, 35, 0.8); drawCloud(600, 70, 1.1);
 
-  const oceanY = GROUND_Y - 100;
-  const oceanGrad = c.createLinearGradient(0, oceanY, 0, GROUND_Y);
-  oceanGrad.addColorStop(0, '#0288d1'); oceanGrad.addColorStop(0.5, '#039be5'); oceanGrad.addColorStop(1, '#4fc3f7');
-  c.fillStyle = oceanGrad; c.fillRect(0, oceanY, W, 100);
+  // Field background (behind playing area)
+  const fieldGrad = c.createLinearGradient(0, 218, 0, GROUND_Y);
+  fieldGrad.addColorStop(0, '#2d7d2d');
+  fieldGrad.addColorStop(0.5, '#3a9a3a');
+  fieldGrad.addColorStop(1, '#45a845');
+  c.fillStyle = fieldGrad;
+  c.fillRect(0, 218, W, GROUND_Y - 218);
 
-  c.strokeStyle = 'rgba(255,255,255,0.4)'; c.lineWidth = 2;
-  for (let wave = 0; wave < 4; wave++) {
-    c.beginPath(); const wy = oceanY + 20 + wave * 22;
-    for (let x = 0; x < W; x += 2) { const y = wy + Math.sin(x*0.03+wave*2)*4; x===0?c.moveTo(x,y):c.lineTo(x,y); }
-    c.stroke();
+  // Grass stripes
+  c.fillStyle = 'rgba(0,0,0,0.04)';
+  for (let x = 0; x < W; x += 60) {
+    c.fillRect(x, 218, 30, GROUND_Y - 218);
   }
 
-  const sandGrad = c.createLinearGradient(0, GROUND_Y, 0, H);
-  sandGrad.addColorStop(0, '#ffe0b2'); sandGrad.addColorStop(0.3, '#ffcc80'); sandGrad.addColorStop(1, '#ffb74d');
-  c.fillStyle = sandGrad; c.fillRect(0, GROUND_Y, W, H - GROUND_Y);
-
-  c.fillStyle = 'rgba(210,160,80,0.3)';
-  for (let i = 0; i < 200; i++) {
-    c.beginPath(); c.arc(Math.random()*W, GROUND_Y+Math.random()*(H-GROUND_Y), Math.random()*2+0.5, 0, Math.PI*2); c.fill();
-  }
-
-  drawPalmTree(c, 70, GROUND_Y - 5, 0.9);
-  drawPalmTree(c, W - 60, GROUND_Y - 5, 1);
+  // Ground
+  const groundGrad = c.createLinearGradient(0, GROUND_Y, 0, H);
+  groundGrad.addColorStop(0, '#3da03d');
+  groundGrad.addColorStop(1, '#2d8b2d');
+  c.fillStyle = groundGrad;
+  c.fillRect(0, GROUND_Y, W, H - GROUND_Y);
 }
 
-function drawPalmTree(c, x, y, scale) {
-  c.strokeStyle = '#795548'; c.lineWidth = 8*scale; c.lineCap = 'round';
-  c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x+10*scale, y-80*scale, x+5*scale, y-140*scale); c.stroke();
-  c.strokeStyle = '#5d4037'; c.lineWidth = 1;
-  for (let i = 0; i < 8; i++) { c.beginPath(); c.moveTo(x-4*scale, y-i*16*scale); c.lineTo(x+8*scale, y-i*16*scale); c.stroke(); }
-  const topX = x+5*scale, topY = y-140*scale;
-  c.fillStyle = '#4caf50';
-  for (let i = 0; i < 6; i++) { c.save(); c.translate(topX,topY); c.rotate((i/6)*Math.PI*2+0.3); c.beginPath(); c.ellipse(30*scale,0,35*scale,8*scale,0,0,Math.PI*2); c.fill(); c.restore(); }
-  c.fillStyle = '#388e3c';
-  for (let i = 0; i < 3; i++) { c.save(); c.translate(topX,topY); c.rotate((i/3)*Math.PI*2+1); c.beginPath(); c.ellipse(25*scale,0,28*scale,5*scale,0,0,Math.PI*2); c.fill(); c.restore(); }
+function drawFans() {
+  const t = frameCount * 0.05;
+  const chelseaHappy = crowdCelebrate > 0;
+  const barcaHappy = crowdCelebrate < 0;
+  const intensity = Math.min(Math.abs(crowdCelebrate) / 60, 1);
+
+  for (const fan of fans) {
+    const s = fan.size;
+    const isCel = (fan.team === 'chelsea' && chelseaHappy) || (fan.team === 'barca' && barcaHappy);
+    const isSad = (fan.team === 'chelsea' && barcaHappy) || (fan.team === 'barca' && chelseaHappy);
+
+    let armAngle, jumpY = 0, flipAngle = 0;
+
+    if (isCel) {
+      // Celebrating: wild arm waving, jumping, some flipping
+      armAngle = Math.sin(t * fan.speed * 8 + fan.phase) * 1.0 - 1.3;
+      jumpY = Math.abs(Math.sin(t * fan.speed * 5 + fan.phase)) * 10 * s * intensity;
+      if (Math.sin(fan.phase * 3.7) > 0.55) {
+        flipAngle = t * fan.speed * 6 + fan.phase;
+      }
+    } else if (isSad) {
+      // Sad: arms droop, still
+      armAngle = 0.6 + Math.sin(t * 0.3 + fan.phase) * 0.08;
+    } else {
+      // Idle: gentle arm sway with hands up
+      armAngle = Math.sin(t * fan.speed + fan.phase) * 0.35 - 0.8;
+    }
+
+    const fx = fan.x;
+    const fy = fan.y - jumpY;
+    const headR = 3.5 * s;
+    const bodyH = 9 * s;
+    const armLen = 7 * s;
+
+    ctx.save();
+    if (flipAngle) {
+      ctx.translate(fx, fy + bodyH / 2);
+      ctx.rotate(flipAngle);
+      ctx.translate(-fx, -(fy + bodyH / 2));
+    }
+
+    // Body (team jersey)
+    const tc = fan.team === 'chelsea';
+    ctx.fillStyle = tc
+      ? (Math.sin(fan.phase * 5) > 0 ? '#034694' : '#1a6bc4')
+      : (Math.sin(fan.phase * 5) > 0 ? '#a50044' : '#d4266e');
+    ctx.fillRect(fx - 2.5 * s, fy, 5 * s, bodyH);
+
+    // Scarf
+    if (fan.hasScarf) {
+      ctx.fillStyle = tc ? '#fff' : '#004d98';
+      ctx.fillRect(fx - 3 * s, fy - 1, 6 * s, 2.5 * s);
+    }
+
+    // Head
+    ctx.fillStyle = fan.skin;
+    ctx.beginPath();
+    ctx.arc(fx, fy - headR + 1, headR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Arms
+    ctx.strokeStyle = fan.skin;
+    ctx.lineWidth = Math.max(1.5 * s, 1);
+    ctx.lineCap = 'round';
+    const ay = fy + 2 * s;
+    ctx.beginPath();
+    ctx.moveTo(fx - 2.5 * s, ay);
+    ctx.lineTo(
+      fx - 2.5 * s + Math.cos(-1.57 + armAngle - 0.2) * armLen,
+      ay + Math.sin(-1.57 + armAngle - 0.2) * armLen
+    );
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(fx + 2.5 * s, ay);
+    ctx.lineTo(
+      fx + 2.5 * s + Math.cos(-1.57 + armAngle + 0.2) * armLen,
+      ay + Math.sin(-1.57 + armAngle + 0.2) * armLen
+    );
+    ctx.stroke();
+
+    ctx.restore();
+  }
 }
 
 function drawBackground() {
-  if (!bgCanvas) createBeachBG();
+  if (!bgCanvas) { createStadiumBG(); initFans(); }
   ctx.drawImage(bgCanvas, 0, 0);
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+  drawFans();
+  if (crowdCelebrate > 0) crowdCelebrate--;
+  else if (crowdCelebrate < 0) crowdCelebrate++;
+  // Field lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(W, GROUND_Y); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(W/2, GROUND_Y); ctx.lineTo(W/2, H); ctx.stroke();
-  ctx.beginPath(); ctx.arc(W/2, GROUND_Y+30, 40, 0, Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W / 2, GROUND_Y); ctx.lineTo(W / 2, H); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W / 2, GROUND_Y + 30, 40, 0, Math.PI * 2); ctx.stroke();
   drawGoal(0, true); drawGoal(W, false);
 }
 
@@ -1072,7 +1231,7 @@ function gameLoop() {
           bicycleKick(p1); p1._bicycleUsed = true;
         }
         movePlayer(p2, remoteKeys.left, remoteKeys.right, remoteKeys.up, remoteKeys.down, 0, W);
-        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low, !!remoteKeys.up, !!remoteKeys.cancel);
+        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low, !!remoteKeys.upkick, !!remoteKeys.cancel);
         if (remoteKeys.bicycle && !p2.onGround && p2.kickTimer <= 0 && !p2._bicycleUsed && !p2.isCharging) {
           bicycleKick(p2); p2._bicycleUsed = true;
         }
