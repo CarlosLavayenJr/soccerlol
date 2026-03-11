@@ -224,8 +224,8 @@ function startLocal() {
   gameStarted = true;
   document.getElementById('lobby').classList.add('hidden');
   document.getElementById('controls').innerHTML =
-    '<span>Player 1 (Drogba):</span> W A S D to move · <span>Space</span> kick · <span>L-Ctrl</span> low driven shot &nbsp;|&nbsp;' +
-    '<span>Player 2 (Messi):</span> Arrow Keys to move · <span>K</span> kick · <span>J</span> low driven shot<br>' +
+    '<span>P1 (Drogba):</span> W A S D · <span>Space</span> kick · <span>Ctrl</span> low · <span>Q</span> upkick · <span>E</span> bicycle kick (air) &nbsp;|&nbsp;' +
+    '<span>P2 (Messi):</span> Arrows · <span>K</span> kick · <span>J</span> low · <span>M</span> upkick · <span>H</span> bicycle kick (air)<br>' +
     'Hold shot buttons longer for more power! · <span>Space</span> to cancel charge · First to <span>5</span> goals wins! · Press <span>R</span> to restart';
 }
 
@@ -258,8 +258,8 @@ function startHost() {
         gameStarted = true;
         document.getElementById('lobby').classList.add('hidden');
         document.getElementById('controls').innerHTML =
-          '<span>You are Drogba (Chelsea):</span> W A S D to move · <span>K</span> kick · <span>J</span> low driven · Press <span>R</span> to restart<br>' +
-          'Hold shot buttons longer for more power! · First to <span>5</span> goals wins!';
+          '<span>You are Drogba (Chelsea):</span> W A S D · <span>K</span> kick · <span>J</span> low · <span>M</span> upkick · <span>H</span> bicycle (air)<br>' +
+          'Hold shot buttons longer for more power! · <span>Space</span> cancel charge · First to <span>5</span> goals wins! · Press <span>R</span> to restart';
         conn.send({ type: 'start' });
       }, 500);
     });
@@ -309,8 +309,8 @@ function joinRoom() {
         gameStarted = true;
         document.getElementById('lobby').classList.add('hidden');
         document.getElementById('controls').innerHTML =
-          '<span>You are Messi (Barcelona):</span> W A S D to move · <span>K</span> kick · <span>J</span> low driven · Press <span>R</span> to restart<br>' +
-          'Hold shot buttons longer for more power! · First to <span>5</span> goals wins!';
+          '<span>You are Messi (Barcelona):</span> W A S D · <span>K</span> kick · <span>J</span> low · <span>M</span> upkick · <span>H</span> bicycle (air)<br>' +
+          'Hold shot buttons longer for more power! · <span>Space</span> cancel charge · First to <span>5</span> goals wins! · Press <span>R</span> to restart';
       }
       if (data.type === 'state') {
         // Apply received state
@@ -342,12 +342,14 @@ function joinRoom() {
 function applyState(data) {
   p1.x = data.p1.x; p1.y = data.p1.y; p1.vx = data.p1.vx; p1.vy = data.p1.vy;
   p1.facingRight = data.p1.facingRight; p1.kickTimer = data.p1.kickTimer;
-  p1.legAngle = data.p1.legAngle; p1.isCharging = data.p1.isCharging;
+  p1.legAngle = data.p1.legAngle; p1.flipTimer = data.p1.flipTimer;
+  p1.isCharging = data.p1.isCharging;
   p1.chargeFrames = data.p1.chargeFrames; p1.chargeType = data.p1.chargeType;
 
   p2.x = data.p2.x; p2.y = data.p2.y; p2.vx = data.p2.vx; p2.vy = data.p2.vy;
   p2.facingRight = data.p2.facingRight; p2.kickTimer = data.p2.kickTimer;
-  p2.legAngle = data.p2.legAngle; p2.isCharging = data.p2.isCharging;
+  p2.legAngle = data.p2.legAngle; p2.flipTimer = data.p2.flipTimer;
+  p2.isCharging = data.p2.isCharging;
   p2.chargeFrames = data.p2.chargeFrames; p2.chargeType = data.p2.chargeType;
 
   ball.x = data.ball.x; ball.y = data.ball.y; ball.vx = data.ball.vx; ball.vy = data.ball.vy;
@@ -361,7 +363,8 @@ function getPlayerState(p) {
   return {
     x: p.x, y: p.y, vx: p.vx, vy: p.vy,
     facingRight: p.facingRight, kickTimer: p.kickTimer,
-    legAngle: p.legAngle, isCharging: p.isCharging,
+    legAngle: p.legAngle, flipTimer: p.flipTimer,
+    isCharging: p.isCharging,
     chargeFrames: p.chargeFrames, chargeType: p.chargeType
   };
 }
@@ -391,6 +394,8 @@ function sendInputs() {
         down: !!keys['s'],
         kick: !!keys['k'],
         low: !!keys['j'],
+        up: !!keys['m'],
+        bicycle: !!keys['h'],
         cancel: !!keys[' ']
       }
     });
@@ -454,7 +459,7 @@ function createPlayer(x, facingRight, colors, name) {
     x, y: GROUND_Y, vx: 0, vy: 0,
     w: 36, h: 50, headR: 28,
     onGround: true, facingRight, colors, name,
-    kickTimer: 0, legAngle: 0,
+    kickTimer: 0, legAngle: 0, flipTimer: 0,
     chargeKey: null, chargeFrames: 0, chargeType: null, isCharging: false
   };
 }
@@ -464,9 +469,9 @@ let p2 = createPlayer(700, false, BARCA, 'messi');
 let ball = { x: W / 2, y: 200, vx: 0, vy: 0, r: 16 };
 
 // Charge system using direct key booleans clos
-function handleChargeOnline(p, kickPressed, lowPressed, cancelPressed) {
+function handleChargeOnline(p, kickPressed, lowPressed, upPressed, cancelPressed) {
   // Clear cancel flag when all shot keys are released
-  if (!kickPressed && !lowPressed) p._shotCancelled = false;
+  if (!kickPressed && !lowPressed && !upPressed) p._shotCancelled = false;
 
   if (p.isCharging) {
     if (cancelPressed) {
@@ -478,7 +483,7 @@ function handleChargeOnline(p, kickPressed, lowPressed, cancelPressed) {
       p._shotCancelled = true;
       return;
     }
-    const stillHeld = (p._chargeActive === 'kick' && kickPressed) || (p._chargeActive === 'low' && lowPressed);
+    const stillHeld = (p._chargeActive === 'kick' && kickPressed) || (p._chargeActive === 'low' && lowPressed) || (p._chargeActive === 'up' && upPressed);
     if (stillHeld) {
       p.chargeFrames = Math.min(p.chargeFrames + 1, MAX_CHARGE_FRAMES);
     } else {
@@ -498,27 +503,34 @@ function handleChargeOnline(p, kickPressed, lowPressed, cancelPressed) {
   // Don't start a new charge right after canceling
   if (p._shotCancelled) return;
 
-  if (kickPressed && p.kickTimer <= 0) {
+  if (kickPressed && !p.isCharging && p.kickTimer <= 0) {
     p.isCharging = true;
     p.chargeType = 'regular';
     p.chargeFrames = 0;
     p._chargeActive = 'kick';
   }
-  if (lowPressed && p.kickTimer <= 0) {
+  if (lowPressed && !p.isCharging && p.kickTimer <= 0) {
     p.isCharging = true;
     p.chargeType = 'low';
     p.chargeFrames = 0;
     p._chargeActive = 'low';
   }
+  if (upPressed && !p.isCharging && p.kickTimer <= 0) {
+    p.isCharging = true;
+    p.chargeType = 'up';
+    p.chargeFrames = 0;
+    p._chargeActive = 'up';
+  }
 }
 
-function handleCharge(p, regularKey, lowKey, cancelKey) {
+function handleCharge(p, regularKey, lowKey, upKey, cancelKey) {
   const cancelPressed = !!keys[cancelKey];
   // Don't cancel if the cancel key is the same key being used to charge
   const shouldCancel = cancelPressed &&
     !((p._chargeActive === 'kick' && cancelKey === regularKey) ||
-      (p._chargeActive === 'low' && cancelKey === lowKey));
-  handleChargeOnline(p, !!keys[regularKey], !!keys[lowKey], shouldCancel);
+      (p._chargeActive === 'low' && cancelKey === lowKey) ||
+      (p._chargeActive === 'up' && cancelKey === upKey));
+  handleChargeOnline(p, !!keys[regularKey], !!keys[lowKey], !!keys[upKey], shouldCancel);
 }
 
 function fireShot(p, power, type) {
@@ -535,6 +547,9 @@ function fireShot(p, power, type) {
     ball.vx = Math.cos(kickAngle) * power + p.vx * 0.4;
     ball.vy = Math.sin(kickAngle) * power - (power * 0.4);
     if (ball.y < p.y - 40) ball.vy -= 4;
+  } else if (type === 'up') {
+    ball.vx = p.vx * 0.3;
+    ball.vy = -power * 1.1;
   } else {
     ball.vx = dir * power * 1.1;
     ball.vy = 1.5;
@@ -543,7 +558,26 @@ function fireShot(p, power, type) {
 
   screenShake = 3 + power * 0.3;
   spawnParticles(ball.x, ball.y, 6 + Math.floor(power * 0.5),
-    type === 'low' ? '#ff6600' : '#fff');
+    type === 'low' ? '#ff6600' : type === 'up' ? '#00ccff' : '#fff');
+}
+
+function bicycleKick(p) {
+  const dx = ball.x - p.x;
+  const dy = ball.y - (p.y - 20);
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist > KICK_RANGE + ball.r + 10) return;
+
+  p.kickTimer = 20;
+  p.flipTimer = 20;
+  p._windupAngle = 0;
+  const dir = p.facingRight ? 1 : -1;
+  const power = MAX_KICK_POWER;
+
+  ball.vx = dir * power * 1.0;
+  ball.vy = -power * 0.6;
+
+  screenShake = 8;
+  spawnParticles(ball.x, ball.y, 15, '#ff4444');
 }
 
 function movePlayer(p, left, right, up, down, minX, maxX) {
@@ -573,6 +607,9 @@ function movePlayer(p, left, right, up, down, minX, maxX) {
   } else {
     p.legAngle *= 0.8;
   }
+
+  if (p.flipTimer > 0) p.flipTimer--;
+  if (p.onGround) p._bicycleUsed = false;
 }
 
 function headCollision(p) {
@@ -583,11 +620,16 @@ function headCollision(p) {
   const dist = Math.sqrt(dx * dx + dy * dy);
   const minDist = p.headR + ball.r;
 
-  if (dist < minDist && dist > 0) {
-    const nx = dx / dist;
-    const ny = dy / dist;
-    ball.x = headX + nx * minDist;
-    ball.y = headY + ny * minDist;
+  if (dist < minDist) {
+    let nx, ny;
+    if (dist === 0) {
+      nx = 0; ny = -1;
+      ball.x = headX; ball.y = headY - minDist;
+    } else {
+      nx = dx / dist; ny = dy / dist;
+      ball.x = headX + nx * minDist;
+      ball.y = headY + ny * minDist;
+    }
 
     const relVx = ball.vx - p.vx;
     const relVy = ball.vy - p.vy;
@@ -612,11 +654,23 @@ function bodyCollision(p) {
   const dy = ball.y - closestY;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
-  if (dist < ball.r && dist > 0) {
-    const nx = dx / dist;
-    const ny = dy / dist;
-    ball.x = closestX + nx * ball.r;
-    ball.y = closestY + ny * ball.r;
+  if (dist < ball.r) {
+    let nx, ny;
+    if (dist === 0) {
+      // Ball center inside body - find nearest edge and push out
+      const dL = ball.x - bodyLeft, dR = bodyRight - ball.x;
+      const dT = ball.y - bodyTop, dB = p.y - ball.y;
+      const minD = Math.min(dL, dR, dT, dB);
+      if (minD === dT) { nx = 0; ny = -1; ball.y = bodyTop - ball.r; }
+      else if (minD === dB) { nx = 0; ny = 1; ball.y = p.y + ball.r; }
+      else if (minD === dL) { nx = -1; ny = 0; ball.x = bodyLeft - ball.r; }
+      else { nx = 1; ny = 0; ball.x = bodyRight + ball.r; }
+    } else {
+      nx = dx / dist;
+      ny = dy / dist;
+      ball.x = closestX + nx * ball.r;
+      ball.y = closestY + ny * ball.r;
+    }
     const dot = ball.vx * nx + ball.vy * ny;
     if (dot < 0) {
       ball.vx -= 1.8 * dot * nx + p.vx * 0.3;
@@ -752,8 +806,10 @@ function updateScoreboard() {
 function resetPositions() {
   p1.x = 200; p1.y = GROUND_Y; p1.vx = 0; p1.vy = 0; p1.kickTimer = 0;
   p1.isCharging = false; p1.chargeFrames = 0; p1.chargeKey = null; p1._chargeActive = null; p1._shotCancelled = false;
+  p1.flipTimer = 0; p1._bicycleUsed = false;
   p2.x = 700; p2.y = GROUND_Y; p2.vx = 0; p2.vy = 0; p2.kickTimer = 0;
   p2.isCharging = false; p2.chargeFrames = 0; p2.chargeKey = null; p2._chargeActive = null; p2._shotCancelled = false;
+  p2.flipTimer = 0; p2._bicycleUsed = false;
   ball.x = W / 2; ball.y = 200; ball.vx = 0; ball.vy = 0;
 }
 
@@ -885,6 +941,17 @@ function drawPlayer(p) {
 
   ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(p.x, GROUND_Y+2, 22, 6, 0, 0, Math.PI*2); ctx.fill();
 
+  // Flip rotation for bicycle kick
+  ctx.save();
+  if (p.flipTimer > 0) {
+    const ft = 1 - (p.flipTimer / 20);
+    const fa = ft * Math.PI * 2;
+    const fd = p.facingRight ? -1 : 1;
+    ctx.translate(p.x, p.y - p.h / 2);
+    ctx.rotate(fd * fa);
+    ctx.translate(-p.x, -(p.y - p.h / 2));
+  }
+
   ctx.save(); ctx.translate(p.x, p.y-10);
   ctx.fillStyle = col.socks; ctx.save(); ctx.rotate(-dir*p.legAngle*0.5); ctx.fillRect(-5,0,10,14); ctx.restore();
   ctx.save(); ctx.rotate(dir*p.legAngle); ctx.fillRect(-5,0,10,14); ctx.fillStyle='#111'; ctx.fillRect(dir>0?-3:-7,10,12,5); ctx.restore();
@@ -910,13 +977,15 @@ function drawPlayer(p) {
     ctx.fillStyle = `rgb(${Math.floor(255*ratio)},${Math.floor(255*(1-ratio))},0)`;
     ctx.fillRect(barX,barY,barW*ratio,barH);
     ctx.fillStyle='#fff'; ctx.font='bold 9px sans-serif'; ctx.textAlign='center';
-    ctx.fillText(p.chargeType==='low'?'LOW':'KICK', p.x, barY-3);
+    ctx.fillText(p.chargeType==='low'?'LOW':p.chargeType==='up'?'UP':'KICK', p.x, barY-3);
   }
 
   if (p.kickTimer > 12) {
     ctx.strokeStyle = 'rgba(255,255,0,0.6)'; ctx.lineWidth=3;
     ctx.beginPath(); ctx.arc(p.x+dir*30, p.y-5, 15+(18-p.kickTimer)*3, 0, Math.PI*2); ctx.stroke();
   }
+
+  ctx.restore(); // end flip rotation
 }
 
 function drawDrogba(p, headY, bodyTop, dir) {
@@ -986,15 +1055,27 @@ function gameLoop() {
       if (netMode === 'local') {
         // Local: both players use their own keys
         movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
-        handleCharge(p1, ' ', 'control', ' ');
+        handleCharge(p1, ' ', 'control', 'q', ' ');
+        if (keys['e'] && !p1.onGround && p1.kickTimer <= 0 && !p1._bicycleUsed && !p1.isCharging) {
+          bicycleKick(p1); p1._bicycleUsed = true;
+        }
         movePlayer(p2, keys['arrowleft'], keys['arrowright'], keys['arrowup'], keys['arrowdown'], 0, W);
-        handleCharge(p2, 'k', 'j', ' ');
+        handleCharge(p2, 'k', 'j', 'm', ' ');
+        if (keys['h'] && !p2.onGround && p2.kickTimer <= 0 && !p2._bicycleUsed && !p2.isCharging) {
+          bicycleKick(p2); p2._bicycleUsed = true;
+        }
       } else if (netMode === 'host') {
         // Host: P1 = local WASD+J/K, P2 = remote WASD+J/K
         movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
-        handleCharge(p1, 'k', 'j', ' ');
+        handleCharge(p1, 'k', 'j', 'm', ' ');
+        if (keys['h'] && !p1.onGround && p1.kickTimer <= 0 && !p1._bicycleUsed && !p1.isCharging) {
+          bicycleKick(p1); p1._bicycleUsed = true;
+        }
         movePlayer(p2, remoteKeys.left, remoteKeys.right, remoteKeys.up, remoteKeys.down, 0, W);
-        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low, !!remoteKeys.cancel);
+        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low, !!remoteKeys.up, !!remoteKeys.cancel);
+        if (remoteKeys.bicycle && !p2.onGround && p2.kickTimer <= 0 && !p2._bicycleUsed && !p2.isCharging) {
+          bicycleKick(p2); p2._bicycleUsed = true;
+        }
       } else if (netMode === 'client') {
         // Client sends inputs, doesn't run physics
         sendInputs();
