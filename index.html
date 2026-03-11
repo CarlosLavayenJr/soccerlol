@@ -226,7 +226,7 @@ function startLocal() {
   document.getElementById('controls').innerHTML =
     '<span>Player 1 (Drogba):</span> W A S D to move · <span>Space</span> kick · <span>L-Ctrl</span> low driven shot &nbsp;|&nbsp;' +
     '<span>Player 2 (Messi):</span> Arrow Keys to move · <span>K</span> kick · <span>J</span> low driven shot<br>' +
-    'Hold shot buttons longer for more power! · First to <span>5</span> goals wins! · Press <span>R</span> to restart';
+    'Hold shot buttons longer for more power! · <span>Space</span> to cancel charge · First to <span>5</span> goals wins! · Press <span>R</span> to restart';
 }
 
 function startHost() {
@@ -390,7 +390,8 @@ function sendInputs() {
         up: !!keys['w'],
         down: !!keys['s'],
         kick: !!keys['k'],
-        low: !!keys['j']
+        low: !!keys['j'],
+        cancel: !!keys[' ']
       }
     });
   }
@@ -463,21 +464,20 @@ let p2 = createPlayer(700, false, BARCA, 'messi');
 let ball = { x: W / 2, y: 200, vx: 0, vy: 0, r: 16 };
 
 // Charge system using direct key booleans clos
-function handleChargeOnline(p, kickPressed, lowPressed) {
-  if (kickPressed && !p.isCharging && p.kickTimer <= 0) {
-    p.isCharging = true;
-    p.chargeType = 'regular';
-    p.chargeFrames = 0;
-    p._chargeActive = 'kick';
-  }
-  if (lowPressed && !p.isCharging && p.kickTimer <= 0) {
-    p.isCharging = true;
-    p.chargeType = 'low';
-    p.chargeFrames = 0;
-    p._chargeActive = 'low';
-  }
+function handleChargeOnline(p, kickPressed, lowPressed, cancelPressed) {
+  // Clear cancel flag when all shot keys are released
+  if (!kickPressed && !lowPressed) p._shotCancelled = false;
 
   if (p.isCharging) {
+    if (cancelPressed) {
+      // Cancel the shot without firing
+      p.isCharging = false;
+      p.chargeFrames = 0;
+      p.chargeType = null;
+      p._chargeActive = null;
+      p._shotCancelled = true;
+      return;
+    }
     const stillHeld = (p._chargeActive === 'kick' && kickPressed) || (p._chargeActive === 'low' && lowPressed);
     if (stillHeld) {
       p.chargeFrames = Math.min(p.chargeFrames + 1, MAX_CHARGE_FRAMES);
@@ -491,11 +491,33 @@ function handleChargeOnline(p, kickPressed, lowPressed) {
       p.chargeType = null;
       p._chargeActive = null;
     }
+    return;
+  }
+
+  // Don't start a new charge right after canceling
+  if (p._shotCancelled) return;
+
+  if (kickPressed && p.kickTimer <= 0) {
+    p.isCharging = true;
+    p.chargeType = 'regular';
+    p.chargeFrames = 0;
+    p._chargeActive = 'kick';
+  }
+  if (lowPressed && p.kickTimer <= 0) {
+    p.isCharging = true;
+    p.chargeType = 'low';
+    p.chargeFrames = 0;
+    p._chargeActive = 'low';
   }
 }
 
-function handleCharge(p, regularKey, lowKey) {
-  handleChargeOnline(p, !!keys[regularKey], !!keys[lowKey]);
+function handleCharge(p, regularKey, lowKey, cancelKey) {
+  const cancelPressed = !!keys[cancelKey];
+  // Don't cancel if the cancel key is the same key being used to charge
+  const shouldCancel = cancelPressed &&
+    !((p._chargeActive === 'kick' && cancelKey === regularKey) ||
+      (p._chargeActive === 'low' && cancelKey === lowKey));
+  handleChargeOnline(p, !!keys[regularKey], !!keys[lowKey], shouldCancel);
 }
 
 function fireShot(p, power, type) {
@@ -713,9 +735,9 @@ function updateScoreboard() {
 
 function resetPositions() {
   p1.x = 200; p1.y = GROUND_Y; p1.vx = 0; p1.vy = 0; p1.kickTimer = 0;
-  p1.isCharging = false; p1.chargeFrames = 0; p1.chargeKey = null; p1._chargeActive = null;
+  p1.isCharging = false; p1.chargeFrames = 0; p1.chargeKey = null; p1._chargeActive = null; p1._shotCancelled = false;
   p2.x = 700; p2.y = GROUND_Y; p2.vx = 0; p2.vy = 0; p2.kickTimer = 0;
-  p2.isCharging = false; p2.chargeFrames = 0; p2.chargeKey = null; p2._chargeActive = null;
+  p2.isCharging = false; p2.chargeFrames = 0; p2.chargeKey = null; p2._chargeActive = null; p2._shotCancelled = false;
   ball.x = W / 2; ball.y = 200; ball.vx = 0; ball.vy = 0;
 }
 
@@ -948,15 +970,15 @@ function gameLoop() {
       if (netMode === 'local') {
         // Local: both players use their own keys
         movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
-        handleCharge(p1, ' ', 'control');
+        handleCharge(p1, ' ', 'control', ' ');
         movePlayer(p2, keys['arrowleft'], keys['arrowright'], keys['arrowup'], keys['arrowdown'], 0, W);
-        handleCharge(p2, 'k', 'j');
+        handleCharge(p2, 'k', 'j', ' ');
       } else if (netMode === 'host') {
         // Host: P1 = local WASD+J/K, P2 = remote WASD+J/K
         movePlayer(p1, keys['a'], keys['d'], keys['w'], keys['s'], 0, W);
-        handleCharge(p1, 'k', 'j');
+        handleCharge(p1, 'k', 'j', ' ');
         movePlayer(p2, remoteKeys.left, remoteKeys.right, remoteKeys.up, remoteKeys.down, 0, W);
-        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low);
+        handleChargeOnline(p2, !!remoteKeys.kick, !!remoteKeys.low, !!remoteKeys.cancel);
       } else if (netMode === 'client') {
         // Client sends inputs, doesn't run physics
         sendInputs();
